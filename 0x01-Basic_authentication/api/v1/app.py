@@ -1,60 +1,63 @@
 #!/usr/bin/env python3
 """
-Main module for the API
+Route module for the API
 """
-from flask import Flask, request, abort
-from flask_cors import CORS
+from os import getenv
+from api.v1.views import app_views
+from flask import Flask, jsonify, abort, request
+from flask_cors import (CORS, cross_origin)
 import os
 
-# Import the relevant Auth class based on AUTH_TYPE
+app = Flask(__name__)
+app.register_blueprint(app_views)
+CORS(app, resources={r"/api/v1/*": {"origins": "*"}})
 auth = None
+AUTH_TYPE = getenv("AUTH_TYPE")
 
-if os.getenv('AUTH_TYPE') == 'basic_auth':
-    from api.v1.auth.basic_auth import BasicAuth
-    auth = BasicAuth()
-elif os.getenv('AUTH_TYPE') == 'auth':
+if AUTH_TYPE == "auth":
     from api.v1.auth.auth import Auth
     auth = Auth()
+elif AUTH_TYPE == "basic_auth":
+    from api.v1.auth.basic_auth import BasicAuth
+    auth = BasicAuth()
 
-app = Flask(__name__)
-CORS(app)
+@app.errorhandler(404)
+def not_found(error) -> str:
+    """ Not found handler
+    """
+    return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(401)
+def unauthorized(error) -> str:
+    """ Unauthorized handler
+    """
+    return jsonify({"error": "Unauthorized"}), 401
+
+@app.errorhandler(403)
+def forbidden(error) -> str:
+    """ Forbidden handler
+    """
+    return jsonify({"error": "Forbidden"}), 403
 
 @app.before_request
-def before_request():
-    """
-    Handles requests before they are processed
+def before_request() -> str:
+    """ Before Request Handler
+    Requests Validation
     """
     if auth is None:
         return
-    
+
     excluded_paths = ['/api/v1/status/', '/api/v1/unauthorized/', '/api/v1/forbidden/']
+    if not auth.require_auth(request.path, excluded_paths):
+        return
     
-    if request.path not in excluded_paths:
-        if auth.authorization_header(request) is None:
-            abort(401)
-        if auth.current_user(request) is None:
-            abort(403)
+    if auth.authorization_header(request) is None:
+        abort(401)
+    
+    if auth.current_user(request) is None:
+        abort(403)
 
-@app.route('/api/v1/status', methods=['GET'])
-def status():
-    """
-    Returns the status of the API
-    """
-    return {'status': 'OK'}
-
-@app.route('/api/v1/unauthorized', methods=['GET'])
-def unauthorized():
-    """
-    Returns unauthorized error message
-    """
-    return {'error': 'Unauthorized'}, 401
-
-@app.route('/api/v1/forbidden', methods=['GET'])
-def forbidden():
-    """
-    Returns forbidden error message
-    """
-    return {'error': 'Forbidden'}, 403
-
-if __name__ == '__main__':
-    app.run(host=os.getenv('API_HOST', '0.0.0.0'), port=int(os.getenv('API_PORT', 5000)))
+if __name__ == "__main__":
+    host = getenv("API_HOST", "0.0.0.0")
+    port = getenv("API_PORT", "5000")
+    app.run(host=host, port=port)
